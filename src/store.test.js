@@ -1,0 +1,41 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {MENU,empty,transition,total,lines,analytics,kitchenStatus} from './store.js';
+const item=(id,v,qty)=>{const m=MENU.find(m=>m.id===id);return {id,name:m.name,variant:m.variants[v][0],price:m.variants[v][1],qty};};
+test('dine-in additions stay in separate batches, bill locks ordering, payment counts once',()=>{
+ let s=transition(empty(),{type:'place',orderType:'Dine-in',table:5,items:[item('dal-chawal',1,2)]});
+ const id=s.orders[0].id;
+ assert.equal(analytics(s).sales,0);
+ s=transition(s,{type:'advance',id,batch:1});s=transition(s,{type:'advance',id,batch:1});
+ assert.equal(kitchenStatus(s.orders[0]),'Ready');
+ s=transition(s,{type:'serve',id});
+ s=transition(s,{type:'place',orderType:'Dine-in',table:5,items:[item('cold-drinks',0,2)]});
+ assert.equal(s.orders.length,1);assert.equal(s.orders[0].batches.length,2);
+ assert.equal(s.orders[0].batches[0].status,'Ready');assert.equal(s.orders[0].batches[0].served,true);
+ assert.equal(s.orders[0].batches[1].status,'Pending');assert.equal(total(s.orders[0]),560);
+ s=transition(s,{type:'bill',id});const locked=transition(s,{type:'place',orderType:'Dine-in',table:5,items:[item('anda',0,1)]});assert.deepEqual(locked,s);
+ s=transition(s,{type:'pay',id});s=transition(s,{type:'pay',id});
+ assert.equal(s.orders[0].closed,true);assert.equal(analytics(s).sales,560);assert.equal(analytics(s).paid.length,1);
+ assert.equal(analytics(s).quantities.find(i=>i.id==='dal-chawal'&&i.variant==='Full').qty,2);
+ assert.equal(analytics(s).dine,560);
+ s=transition(s,{type:'place',orderType:'Dine-in',table:5,items:[item('anda',0,1)]});assert.equal(s.orders.length,2);
+});
+test('takeaway bill exists at placement; closure requires payment and readiness',()=>{
+ let s=transition(empty(),{type:'place',orderType:'Takeaway',items:[item('dal-chawal',2,1),item('water',1,2)]});const id=s.orders[0].id;
+ assert.equal(s.orders[0].billing,true);assert.equal(total(s.orders[0]),550);
+ s=transition(s,{type:'handover',id});assert.equal(s.orders[0].closed,false);
+ s=transition(s,{type:'pay',id});assert.equal(s.orders[0].closed,false);
+ s=transition(s,{type:'handover',id});assert.equal(s.orders[0].closed,false);
+ s=transition(s,{type:'advance',id,batch:1});s=transition(s,{type:'advance',id,batch:1});s=transition(s,{type:'handover',id});
+ assert.equal(s.orders[0].closed,true);assert.equal(analytics(s).takeaway,550);
+ assert.equal(analytics(s).products.find(i=>i.id==='water').qty,2);
+ s=transition(s,{type:'place',orderType:'Takeaway',items:[item('anda',0,1)]});assert.equal(s.orders.length,2);
+ assert.equal(analytics(s).sales,550);
+ assert.equal(lines(s.orders[0]).length,2);
+ assert.deepEqual(JSON.parse(JSON.stringify(s)),s);
+});
+test('analytics excludes previous-day payments and unpaid orders',()=>{
+ let s=transition(empty(),{type:'place',orderType:'Takeaway',items:[item('shami',0,3)]});
+ s=transition(s,{type:'pay',id:1001,now:'2020-01-01T12:00:00Z'});
+ assert.equal(analytics(s).sales,0);assert.equal(analytics(s,new Date('2020-01-01T13:00:00Z')).sales,270);
+});
