@@ -24,6 +24,10 @@ Start empty, or choose **Load sample orders** for a presentation. Loading sample
 
 Data survives refresh through localStorage. Open multiple tabs at the same localhost address (or the same deployed URL) to demonstrate updates across screens. This is a single-browser demo: different devices, browser profiles, and origins do not share data. Clearing browser storage removes the session. It is intended for sequential demonstration actions, not simultaneous production transactions.
 
+The Waiter screen shows open-table status cards below the table selector, with ready food first. Cards show menu thumbnails and batch progress, including when one batch is ready while additional food is still cooking. Mark ready food served directly from its card, or click the card to open the table.
+
+A short chime announces incoming kitchen tickets and preparation changes on the Kitchen screen, and dine-in preparation changes on the Waiter screen, including updates from other tabs. Browsers need an interaction before allowing sound: click **Enable sound** in each tab, or interact with that tab first. Use **Sound on** to mute; enabling sound plays a test chime. Refreshing or switching screens does not replay old alerts. Sound controls affect only the current tab, and visual notices remain available when muted.
+
 ## Add your menu pictures
 
 Copy JPG photos into **public/images/** using exactly these names:
