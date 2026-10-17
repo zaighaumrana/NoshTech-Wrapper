@@ -36,18 +36,38 @@ function Login({error,login,busy}) {
  const [email,setEmail]=useState(''),[password,setPassword]=useState('');
  return <main className="login-screen"><div className="login-hero"><span className="login-logo">n<span>•</span></span><span className="caps">NOSHTECH RESTAURANT WORKSPACE</span><h1>From first order<br/>to final plate.</h1><p>One connected restaurant. Four focused workspaces. Service in sync, from anywhere.</p><div className="login-steps"><span>▤ Waiter</span><span>→</span><span>▣ Counter</span><span>→</span><span>♨ Kitchen</span></div></div><div className="login-pane"><div className="login-box"><span className="eyebrow">STAFF ACCESS</span><h2>Welcome back.</h2><p>Sign in with the email and password assigned by the restaurant owner.</p>{error&&<Banner type="error">{error}</Banner>}<form onSubmit={e=>{e.preventDefault();login(email.trim(),password)}}><label>Email address<input type="email" placeholder="waiter@restaurant.com" required autoComplete="username" value={email} onChange={e=>setEmail(e.target.value)}/></label><label>Password<input type="password" placeholder="••••••••" required autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)}/></label><button className="primary full login-submit" disabled={busy}>{busy?'Signing in…':'Sign in →'}</button></form><small>Demo access only. Staff accounts are created in Supabase Authentication.</small></div></div></main>
 }
+function WaiterOpenOrders({orders,menu,table,setTable,action,busy}) {
+ const sorted=[...orders].sort((a,b)=>Number(b.status==='ready')-Number(a.status==='ready')||a.table_number-b.table_number);
+ return <section className="waiter-orders" aria-label="Open table orders">
+  <div className="section-title"><h2>Open orders <span className="count-number">{orders.length}</span></h2><p>Every table’s progress, at a glance.</p></div>
+  {sorted.length?<div className="waiter-open-grid">{sorted.map(order=>{
+   const ready=order.status==='ready',items=order.order_items||[];
+   const photos=menu.filter(item=>items.some(line=>line.menu_item_id===item.id));
+   const label=order.status==='pending_counter'?'Awaiting payment':order.status==='kitchen_queued'?'Pending':ready?'Ready to serve':'Preparing';
+   return <article key={order.id} className={`waiter-open-card${ready?' is-ready':''}${table===order.table_number?' is-selected':''}`}>
+    <button type="button" className="waiter-open-select" aria-label={`Open ${orderLabel(order)}, ${label}`} aria-pressed={table===order.table_number} onClick={()=>setTable(order.table_number)}>
+     <span className="waiter-open-title"><strong>{orderLabel(order)}</strong><Chip status={order.status} label={label}/></span>
+     <span className="waiter-open-detail">#{order.id} · {totalQuantity(order)} items · {rupees(orderTotal(order))}</span>
+     {photos.length>0&&<span className="waiter-open-photos">{photos.slice(0,3).map(item=><Photo key={item.id} item={item}/>)}{photos.length>3&&<span>+{photos.length-3}</span>}</span>}
+     <span className="waiter-open-progress">{ready?'Ready for your table':order.status==='pending_counter'?'Waiting for counter payment':order.status==='kitchen_queued'?'Waiting in the kitchen':'Being prepared in the kitchen'}</span>
+    </button>
+    {ready&&Boolean(order.paid_at)&&<button type="button" className="waiter-open-serve" disabled={Boolean(busy)} onClick={()=>action(order.id,'serve')}>{busy===`${order.id}:serve`?'Updating…':'✓ Mark served'}</button>}
+   </article>;
+  })}</div>:<p className="waiter-open-empty">No open orders. New table orders will appear here.</p>}
+ </section>;
+}
 function Waiter({menu,orders,place,busy,takeaway=false}) {
  const [table,setTable]=useState(1),[cart,setCart]=useState({}),[search,setSearch]=useState(''),[category,setCategory]=useState('All');
  const cats=['All',...new Set(menu.map(m=>m.category))];
  const filtered=menu.filter(m=>(category==='All'||m.category===category)&&m.name.toLowerCase().includes(search.toLowerCase()));
  const selected=menu.flatMap(m=>(m.menu_variants||[]).map(v=>({variant:v,menu:m,qty:cart[v.id]||0}))).filter(v=>v.qty);
  const sum=selected.reduce((s,i)=>s+i.qty*i.variant.price,0);
- const own=orders.filter(o=>o.status!=='cancelled');
- const occupied=new Set(own.filter(o=>o.status!=='served'||!o.paid_at).map(o=>o.table_number));
+ const own=orders.filter(o=>o.table_number!=null&&['pending_counter','kitchen_queued','preparing','ready'].includes(o.status));
+ const occupied=new Set(own.map(o=>o.table_number));
  const submit=async()=>{const ok=await place(table,selected.map(i=>({variant_id:i.variant.id,qty:i.qty})));if(ok)setCart({});};
  return <><div className="hero-heading"><div><div className="eyebrow">{takeaway?'CASH COUNTER / TAKEAWAY':'DINING ROOM / ORDER DESK'}</div><h1>{takeaway?'New takeaway order.':'Let’s take an order.'}</h1><p>{takeaway?'Build the order, then record the customer’s payment to send it to the kitchen.':'Select a table, add menu items and send the order to the counter for payment.'}</p></div><div className="micro-info">● {own.filter(o=>o.status!=='served').length} active orders</div></div>
  {!takeaway&&<section className="table-chooser"><div className="row-between"><div><h3>Choose a table</h3><p>12 demo tables · green dots show open orders</p></div><span className="eyebrow">DINE-IN</span></div><div className="table-grid">{Array.from({length:12},(_,i)=>i+1).map(n=><button type="button" key={n} className={`${table===n?'selected':''}`} onClick={()=>setTable(n)}>{String(n).padStart(2,'0')}{occupied.has(n)&&<i/>}</button>)}</div></section>}
- {!takeaway&&<section className="waiter-orders" aria-label="My order statuses"><div className="section-title"><h2>My orders <span className="count-number">{own.length}</span></h2><p>Ready dishes can be marked served after the kitchen finishes.</p></div><OrderList role="waiter" orders={own} action={place.action} busy={busy} empty="Your new orders will appear here after you send them."/></section>}
+ {!takeaway&&<WaiterOpenOrders orders={own} menu={menu} table={table} setTable={setTable} action={place.action} busy={busy}/>}
  <div className="ordering-layout"><section><div className="row-between section-title"><div><h2>Menu <span className="count-number">{menu.length}</span></h2><p>Freshly made, ready to order.</p></div><input className="menu-search" placeholder="Search dishes…" aria-label="Search dishes" value={search} onChange={e=>setSearch(e.target.value)}/></div>
  <div className="category-row">{cats.map(c=><button key={c} className={category===c?'on':''} onClick={()=>setCategory(c)}>{c}</button>)}</div>
  <div className="menu-grid">{filtered.map(m=><div className="dish" key={m.id}><Photo item={m}/><div className="dish-body"><div className="dish-category">{m.category}</div><h3>{m.name}</h3><div className="variant-list">{[...(m.menu_variants||[])].sort((a,b)=>a.sort_order-b.sort_order).map(v=><div key={v.id} className="variant"><span>{v.label}<small>{rupees(v.price)}</small></span><div className="counter-stepper">{Boolean(cart[v.id])&&<button aria-label={`Remove ${v.label} ${m.name}`} onClick={()=>setCart(c=>({...c,[v.id]:Math.max(0,(c[v.id]||0)-1)}))}>−</button>}{Boolean(cart[v.id])&&<b>{cart[v.id]}</b>}<button aria-label={`Add ${v.label} ${m.name}`} onClick={()=>setCart(c=>({...c,[v.id]:Math.min(20,(c[v.id]||0)+1)}))}>+</button></div></div>)}</div></div></div>)}</div>{filtered.length===0&&<div className="no-data">No matching dishes.</div>}</section>
