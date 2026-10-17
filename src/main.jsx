@@ -3,6 +3,8 @@ import {createRoot} from 'react-dom/client';
 import {configured,supabase} from './supabase';
 import {rupees,orderTotal,totalQuantity,dayOffset,summarize,statusText,datePK} from './domain';
 import './style.css';
+import './order-notices.css';
+import {useOrderNotifications} from './notifications';
 
 const roles={owner:{name:'Owner',icon:'◈',desc:'Sales insights & team management'},waiter:{name:'Waiter',icon:'▤',desc:'Take orders and serve plates'},counter:{name:'Accounts / POS',icon:'▣',desc:'Approve orders and collect payment'},kitchen:{name:'Kitchen',icon:'♨',desc:'Prepare confirmed orders'}};
 const time = value => new Date(value).toLocaleString('en-PK',{timeZone:'Asia/Karachi',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
@@ -92,6 +94,11 @@ function Owner({orders,profiles,changeRole,busy}) {
 function App(){
  const [session,setSession]=useState(null),[profile,setProfile]=useState(null),[loading,setLoading]=useState(true),[error,setError]=useState(''),[busy,setBusy]=useState('');
  const [menu,setMenu]=useState([]),[orders,setOrders]=useState([]),[profiles,setProfiles]=useState([]),[lastSync,setLastSync]=useState('');
+ const [notificationSnapshot,setNotificationSnapshot]=useState(null),[notice,setNotice]=useState('');
+ const notificationScope=profile?`${profile.id}:${profile.role}`:null;
+ const {sound,toggleSound}=useOrderNotifications(notificationSnapshot,notificationScope,profile?.role,setNotice);
+ useEffect(()=>{if(!notice)return;const timer=setTimeout(()=>setNotice(''),3500);return()=>clearTimeout(timer);},[notice]);
+ useEffect(()=>setNotice(''),[notificationScope]);
  const fetchProfile=useCallback(async(user)=>{if(!user){setProfile(null);setLoading(false);return;}const {data,error:err}=await supabase.from('profiles').select('id,display_name,role').eq('id',user.id).single();if(err){setError(`Couldn't load your staff role: ${err.message}`);setProfile(null);}else{setError('');setProfile(data);}setLoading(false);},[]);
  useEffect(()=>{if(!configured)return;let mounted=true;supabase.auth.getSession().then(({data})=>{if(mounted)setSession(data.session);});const {data:{subscription}}=supabase.auth.onAuthStateChange((_ev,s)=>{if(mounted)setSession(s);});return()=>{mounted=false;subscription.unsubscribe();};},[]);
  useEffect(()=>{if(configured)fetchProfile(session?.user);},[session?.user?.id,fetchProfile]);
@@ -100,11 +107,11 @@ function App(){
    supabase.from('orders').select('id,table_number,status,created_at,approved_at,paid_at,created_by,order_items(id,menu_item_id,item_name,variant_name,unit_price,quantity)').order('created_at',{ascending:false}).limit(500)];
    if(profile.role==='owner')queries.push(supabase.from('profiles').select('id,display_name,role').order('display_name'));
    const [m,o,p]=await Promise.all(queries);const err=m.error||o.error||p?.error;
-   if(err){setError(`Couldn't sync restaurant data: ${err.message}`);return;}setMenu(m.data||[]);setOrders(o.data||[]);if(p)setProfiles(p.data||[]);setLastSync(new Date().toLocaleTimeString('en-PK'));setError('');
+   if(err){setError(`Couldn't sync restaurant data: ${err.message}`);return;}setMenu(m.data||[]);setOrders(o.data||[]);setNotificationSnapshot({scope:`${profile.id}:${profile.role}`,orders:o.data||[]});if(p)setProfiles(p.data||[]);setLastSync(new Date().toLocaleTimeString('en-PK'));setError('');
  },[profile?.id,profile?.role]);
  useEffect(()=>{if(!profile)return;refresh();const channel=supabase.channel(`noshtech-${profile.id}`).on('postgres_changes',{event:'*',schema:'public',table:'orders'},refresh).on('postgres_changes',{event:'*',schema:'public',table:'profiles'},async()=>{const {data:{user}}=await supabase.auth.getUser();if(user)await fetchProfile(user);refresh();}).subscribe();const interval=setInterval(refresh,10000);const onFocus=()=>refresh();window.addEventListener('focus',onFocus);return()=>{supabase.removeChannel(channel);clearInterval(interval);window.removeEventListener('focus',onFocus);};},[profile?.id,profile?.role,refresh,fetchProfile]);
  const login=async(email,password)=>{setBusy('login');setError('');try{const {error:e}=await supabase.auth.signInWithPassword({email,password});if(e)throw e;}catch(e){setError(e.message)}finally{setBusy('')}};
- const logout=async()=>{setBusy('logout');await supabase.auth.signOut();setSession(null);setProfile(null);setOrders([]);setProfiles([]);setBusy('')};
+ const logout=async()=>{setBusy('logout');await supabase.auth.signOut();setSession(null);setProfile(null);setOrders([]);setProfiles([]);setNotificationSnapshot(null);setNotice('');setBusy('')};
  const call=async(fn,args,key)=>{setBusy(key);setError('');try{const {data,error:e}=await supabase.rpc(fn,args);if(e)throw e;await refresh();return data??true;}catch(e){setError(e.message);return false;}finally{setBusy('')}};
  const action=async(id,actionName)=>{if(actionName==='handover'){await call('handover_takeaway',{p_order_id:id},`${id}:${actionName}`);return;}await call('advance_order',{p_order_id:id,p_action:actionName},`${id}:${actionName}`)};
  const place=async(table,items)=>Boolean(await call('place_order',{p_table_number:table,p_items:items},'place'));
@@ -117,11 +124,12 @@ function App(){
  if(!profile)return <div className="setup-screen"><h1>Staff profile unavailable</h1><Banner type="error">{error||'This account is not yet assigned a staff profile.'}</Banner><button className="primary" onClick={()=>fetchProfile(session.user)}>Retry profile</button> <button className="soft" onClick={logout}>Sign out</button></div>;
  const role=roles[profile.role]||roles.waiter;
  return <div className="app-shell"><aside className="sidebar"><div className="brand"><span className="brand-symbol">n<span>•</span></span><div>Nosh<span>Tech</span><small>RESTAURANT WORKSPACE</small></div></div><div className="sidebar-label">YOUR WORKSPACE</div><div className="role-nav"><div className="role-icon">{role.icon}</div><div><b>{role.name}</b><small>{role.desc}</small></div></div><div className="sidebar-spacer"/><div className="live-card"><span className="live-spark">●</span> SHARED DEMO<h3>Orders move between devices.</h3><p>Waiter → Counter → Kitchen → Owner</p></div><button className="signout" onClick={logout} disabled={Boolean(busy)}>↪ Sign out</button></aside>
- <div className="workspace"><header className="topbar"><span className="breadcrumb">NoshTech <span>/</span> {role.name}</span><div className="topbar-right"><span className="sync">● Shared via Supabase</span><span className="date-top">{lastSync&&`Synced ${lastSync}`}</span><span className="avatar">{(profile.display_name||'N').slice(0,2).toUpperCase()}</span></div></header><main className="main-content">{error&&<Banner type="error">{error} <button onClick={()=>{setError('');refresh()}}>Retry</button></Banner>}
+ <div className="workspace"><header className="topbar"><span className="breadcrumb">NoshTech <span>/</span> {role.name}</span><div className="topbar-right"><button className="sound-toggle" data-sound-toggle aria-label={sound==='on'?'Mute notification sounds':'Enable notification sounds'} aria-pressed={sound==='on'} disabled={sound==='unavailable'} title={sound==='waiting'?'Tap to enable notification sounds on this device':sound==='on'?'Notification sounds enabled':sound==='muted'?'Notification sounds muted':'Audio is unavailable in this browser'} onClick={toggleSound}>{sound==='on'?'♫ Sound on':sound==='muted'?'♫ Sound off':sound==='unavailable'?'Audio unavailable':'♫ Enable sound'}</button><span className="sync">● Shared via Supabase</span><span className="date-top">{lastSync&&`Synced ${lastSync}`}</span><span className="avatar">{(profile.display_name||'N').slice(0,2).toUpperCase()}</span></div></header><main className="main-content">{error&&<Banner type="error">{error} <button onClick={()=>{setError('');refresh()}}>Retry</button></Banner>}
  {profile.role==='waiter'?<Waiter menu={menu} orders={orders} place={place} busy={busy}/>:
  profile.role==='counter'?<Counter menu={menu} orders={orders} action={action} placeTakeaway={placeTakeaway} busy={busy}/>:
  profile.role==='kitchen'?<Kitchen orders={orders} action={action} busy={busy}/>:
  <Owner orders={orders} profiles={profiles} changeRole={changeRole} busy={busy}/>}
+ {notice&&<div className="order-notice" role="status" aria-live="polite">{notice}</div>}
  <footer>© NoshTech · Connected demo · All amounts in PKR · Times in Pakistan Standard Time</footer></main></div></div>;
 }
 createRoot(document.getElementById('root')).render(<App/>);
